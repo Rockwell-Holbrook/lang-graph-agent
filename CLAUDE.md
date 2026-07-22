@@ -10,6 +10,12 @@ matter more than UI** — prioritize accordingly. Do not trade correctness or de
 quality for speed. Hold a **high bar on Python idiom and LangGraph patterns**; call
 out and fix anything sub-standard rather than matching a lower bar.
 
+**The exercise spec is the source of truth: [`../AGENT_IDENTITY.md`](AGENT_IDENTITY.md).**
+Read it before planning or building, and check work back against it — the goal is a
+conversational Pokémon agent grounded in live PokéAPI data (tools, multi-turn context,
+agentic reasoning, validation). Do not drift from those requirements or invent scope
+beyond them.
+
 ## Prime directive
 
 **Favor the correct architectural decision over speed or convenience — always.**
@@ -97,12 +103,12 @@ principled path.
 
 1. Before coding a new task: read the prompt and answer four questions — *what does
    it decide? what are the branches? what tools does it need? when does it stop?*
-   (See `PLAYBOOK.md`.) Those answers are the design.
-2. After structural changes: run `python smoke_test.py` (wiring, no API key).
-3. After streaming/transport changes: run `python test_streaming.py`.
-4. Add a test when you add logic. **Never claim something works without running it.**
-5. Verify each branch with a realistic input before reporting done.
-6. Commit in small, logical units with clear messages.
+   Those answers are the design.
+2. After any change: run `pytest` (full offline suite, no API key). Add a test when
+   you add logic. **Never claim something works without running it.**
+3. For grounding against the real PokéAPI: `pytest -m live` (opt-in, network).
+4. Verify each branch with a realistic input before reporting done.
+5. Commit in small, logical units with clear messages.
 
 ## Commands
 
@@ -110,9 +116,10 @@ principled path.
 # venv interpreter (Windows)
 .venv/Scripts/python.exe
 
-python smoke_test.py        # structural checks, no API key
-python test_streaming.py    # SSE translation + LangGraph contract, no API key
-python main.py "..."        # CLI run (needs OPENAI_API_KEY in .env)
+pytest                      # full offline suite (no API key)
+pytest -m live              # grounding vs. the real PokéAPI (opt-in, network)
+python main.py              # CLI REPL (needs OPENAI_API_KEY in .env)
+python main.py "..."        # one-shot CLI run
 uvicorn server:app --reload # chat UI at http://localhost:8000
 ```
 
@@ -122,10 +129,11 @@ uvicorn server:app --reload # chat UI at http://localhost:8000
 - `src/schemas.py` — Pydantic decision shapes (structured output)
 - `src/config.py` — env-driven settings (frozen dataclass)
 - `src/llm.py` — model factory (swappable provider)
+- `src/pokeapi.py` — PokéAPI HTTP client (fetch, cache, normalize, parse)
 - `src/tools.py` — `@tool` functions (typed; docstring = spec)
 - `src/nodes.py` — node functions + the deterministic router
-- `src/graph.py` — graph assembly, edges, loop guard
+- `src/graph.py` — graph assembly, edges, loop guard, checkpointer
 - `server.py` — FastAPI + SSE transport (decoupled from the agent)
 - `web/index.html` — dependency-free chat UI
-- `main.py` — CLI entry; `smoke_test.py`, `test_streaming.py` — offline tests
-- `PLAYBOOK.md` — step-by-step approach for a new task under time pressure
+- `main.py` — CLI REPL / one-shot entry
+- `tests/` — offline pytest suite (`conftest.py` has the mock client + `ScriptedLLM`)
