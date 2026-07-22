@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>LangGraph Agent</title>
+<title>Pokémon Agent</title>
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --line: #262b36;
@@ -74,17 +74,16 @@
 <body>
   <header>
     <span class="dot"></span>
-    <h1>LangGraph Agent — demo</h1>
-    <input id="cust" placeholder="customer id (optional)" />
+    <h1>Pokémon Agent — demo</h1>
   </header>
 
   <div id="log">
-    <div class="chip">Ask a question, file a complaint, or say something vague. Try
-      customer id <b>cust_456</b>.</div>
+    <div class="chip">Ask about any Pokémon, grounded in live PokéAPI data. Try
+      <b>Tell me about Charizard</b>, then <b>What abilities can it have?</b></div>
   </div>
 
   <form id="form">
-    <textarea id="input" placeholder="Type a message…  (Enter to send, Shift+Enter for newline)"></textarea>
+    <textarea id="input" placeholder="Ask about a Pokémon…  (Enter to send, Shift+Enter for newline)"></textarea>
     <button id="send" type="submit">Send</button>
   </form>
 
@@ -93,7 +92,11 @@ const log = document.getElementById('log');
 const form = document.getElementById('form');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
-const custEl = document.getElementById('cust');
+
+// One conversation id per page load -> the server threads it into the graph so
+// follow-ups ("it" -> Charizard) resolve against this session's history.
+const THREAD_ID = (crypto.randomUUID && crypto.randomUUID()) ||
+  (Date.now().toString(36) + Math.random().toString(36).slice(2));
 
 function addRow(role, text = '') {
   const row = document.createElement('div');
@@ -107,14 +110,6 @@ function addRow(role, text = '') {
   return bubble;
 }
 
-function addChip(meta) {
-  const chip = document.createElement('div');
-  chip.className = 'chip';
-  chip.innerHTML = `intent <b>${meta.intent}</b> · route <b>${meta.route}</b> · urgency <b>${meta.urgency}</b>`;
-  log.appendChild(chip);
-  log.scrollTop = log.scrollHeight;
-}
-
 async function send(message) {
   addRow('user', message);
   const bubble = addRow('agent', '');
@@ -124,7 +119,7 @@ async function send(message) {
     const resp = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, customer_id: custEl.value.trim() || null }),
+      body: JSON.stringify({ message, thread_id: THREAD_ID }),
     });
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -156,7 +151,8 @@ async function send(message) {
 function chipFor(meta) {
   const chip = document.createElement('div');
   chip.className = 'chip';
-  chip.innerHTML = `intent <b>${meta.intent}</b> · route <b>${meta.route}</b> · urgency <b>${meta.urgency}</b>`;
+  const followup = meta.is_followup ? ' · <b>follow-up</b>' : '';
+  chip.innerHTML = `route <b>${meta.route}</b> · ${meta.query_type}${followup}`;
   return chip;
 }
 

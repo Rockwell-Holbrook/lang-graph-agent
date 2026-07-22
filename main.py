@@ -1,59 +1,68 @@
-"""Entry point. Run the triage agent against a message.
+"""CLI entry point — chat with the Pokémon agent.
 
 Usage:
-    python main.py                      # runs a few built-in demo messages
-    python main.py "your message here"  # runs one message
-    python main.py "..." --customer cust_456
+    python main.py                      # interactive multi-turn REPL
+    python main.py "What type is Pikachu?"   # one-shot, then exit
+
+The REPL keeps a single thread_id for the whole session, so follow-ups work:
+    you> Tell me about Charizard
+    you> What abilities can it have?     # "it" -> Charizard
+
+Structural wiring can be checked without a key via `pytest` (no API calls).
 """
 from __future__ import annotations
 
-import argparse
 import logging
 import sys
+import uuid
+
+from langchain_core.messages import HumanMessage
 
 from src.config import SETTINGS
 from src.graph import GRAPH
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
-DEMOS = [
-    ("What are your hours on Saturday?", None),
-    ("This is the THIRD time my invoice is wrong. Fix it now.", "cust_456"),
-    ("hey", None),
-]
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
 
-def run_one(message: str, customer_id: str | None) -> None:
-    print("\n" + "=" * 70)
-    print(f"INBOUND: {message!r}  (customer={customer_id})")
+def ask(message: str, thread_id: str) -> str:
+    """Send one turn through the graph and return the agent's reply."""
     result = GRAPH.invoke(
-        {"inbound_message": message, "customer_id": customer_id}
+        {"messages": [HumanMessage(content=message)]},
+        config={"configurable": {"thread_id": thread_id}},
     )
-    c = result.get("classification")
-    if c:
-        print(f"  intent={c.intent.value} sentiment={c.sentiment} "
-              f"urgency={c.urgency} route={c.route.value}")
-    print(f"  handled_by: {result.get('handled_by')}")
-    print(f"  REPLY: {result.get('final_reply')}")
+    return result.get("final_reply") or "(no reply)"
+
+
+def repl() -> None:
+    thread_id = uuid.uuid4().hex
+    print("Pokémon agent — ask me anything about Pokémon. Ctrl-D or 'quit' to exit.\n")
+    while True:
+        try:
+            message = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not message:
+            continue
+        if message.lower() in {"quit", "exit"}:
+            return
+        print(f"bot> {ask(message, thread_id)}\n")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("message", nargs="?", help="Inbound customer message.")
-    parser.add_argument("--customer", default=None, help="Customer id, e.g. cust_456")
-    args = parser.parse_args()
-
     if not SETTINGS.has_api_key:
-        print("ERROR: OPENAI_API_KEY not set. Copy .env.example to .env and add "
-              "your key. (To verify wiring without a key, run smoke_test.py.)",
-              file=sys.stderr)
+        print(
+            "ERROR: OPENAI_API_KEY not set. Copy .env.example to .env and add your key. "
+            "(To verify wiring without a key, run `pytest`.)",
+            file=sys.stderr,
+        )
         return 1
 
-    if args.message:
-        run_one(args.message, args.customer)
+    if len(sys.argv) > 1:
+        message = " ".join(sys.argv[1:])
+        print(ask(message, uuid.uuid4().hex))
     else:
-        for msg, cust in DEMOS:
-            run_one(msg, cust)
+        repl()
     return 0
 
 

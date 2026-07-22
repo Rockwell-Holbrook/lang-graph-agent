@@ -5,6 +5,10 @@ The endpoint streams the agent's response token-by-token over Server-Sent Events
 (SSE), so any client — the bundled index.html, curl, or something else — can attach
 without touching agent code.
 
+Multi-turn memory rides on a `thread_id`: the client sends one per conversation and
+we thread it into the graph config, so the persisted `messages` history lets the
+agent resolve follow-ups like "it" -> Charizard.
+
 Run:
     uvicorn server:app --reload
     # then open http://localhost:8000
@@ -12,23 +16,25 @@ Run:
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from typing import Iterator, Optional
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from src.graph import GRAPH
 
-app = FastAPI(title="LangGraph Agent")
+app = FastAPI(title="Pokémon Agent")
 
 WEB_DIR = Path(__file__).parent / "web"
 
 
 class ChatRequest(BaseModel):
     message: str
-    customer_id: Optional[str] = None
+    thread_id: Optional[str] = None  # conversation id; generated if omitted
 
 
 def _sse(obj: dict) -> str:
@@ -43,16 +49,21 @@ def _event_stream(req: ChatRequest) -> Iterator[str]:
       - "messages": token-level LLM output (for live typing)
       - "values":   the rolling state (for the classification chip + final reply)
 
-    Only free-text from the `agent` node is streamed as tokens; the escalate/clarify
+    Only free-text from the `agent` node is streamed as tokens; the reject/clarify
     paths produce their reply without a token stream, so we emit it once at the end.
     """
-    payload = {"inbound_message": req.message, "customer_id": req.customer_id}
+    # A thread_id is mandatory once a checkpointer is compiled in — generate one if
+    # the client didn't supply it (a fresh, memoryless conversation).
+    thread_id = req.thread_id or uuid.uuid4().hex
+    config = {"configurable": {"thread_id": thread_id}}
+    payload = {"messages": [HumanMessage(content=req.message)]}
+
     streamed_any = False
     final_reply: Optional[str] = None
     meta_sent = False
 
     try:
-        for mode, data in GRAPH.stream(payload, stream_mode=["messages", "values"]):
+        for mode, data in GRAPH.stream(payload, config=config, stream_mode=["messages", "values"]):
             if mode == "messages":
                 msg, metadata = data
                 if metadata.get("langgraph_node") == "agent":
@@ -66,15 +77,15 @@ def _event_stream(req: ChatRequest) -> Iterator[str]:
                 if classification is not None and not meta_sent:
                     yield _sse({
                         "type": "meta",
-                        "intent": classification.intent.value,
+                        "query_type": classification.query_type.value,
                         "route": classification.route.value,
-                        "urgency": classification.urgency,
+                        "is_followup": classification.is_followup,
                     })
                     meta_sent = True
                 if data.get("final_reply"):
                     final_reply = data["final_reply"]
 
-        # escalate / clarify paths (no token stream): emit the reply now.
+        # reject / clarify paths (no token stream): emit the reply now.
         if not streamed_any and final_reply:
             yield _sse({"type": "token", "text": final_reply})
 
