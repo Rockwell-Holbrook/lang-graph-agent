@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+# Tests import the app as `src.*` and `server`, so the repo root must be on the
+# path. `testpaths` keeps discovery to the suite.
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "live: hits the real PokéAPI over the network (deselected by default; run with -m live).",
+]
+# Skip network tests unless explicitly requested.
+addopts = "-m 'not live'"

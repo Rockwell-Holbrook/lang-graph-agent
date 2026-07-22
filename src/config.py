@@ -1,7 +1,8 @@
 """Central configuration.
 
-One place to control model, temperature, and limits so nothing is hard-coded
-inside the graph. Everything reads from environment (.env), with sane defaults.
+One place to control model, temperature, limits, and the PokéAPI endpoint so
+nothing is hard-coded inside the graph or tools. Everything reads from environment
+(.env), with sane defaults.
 """
 from __future__ import annotations
 
@@ -20,6 +21,8 @@ class Settings:
     model: str
     temperature: float
     max_tool_iterations: int
+    pokeapi_base_url: str
+    http_timeout: float
 
     @property
     def has_api_key(self) -> bool:
@@ -32,6 +35,8 @@ def load_settings() -> Settings:
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.2")),
         max_tool_iterations=int(os.getenv("MAX_TOOL_ITERATIONS", "5")),
+        pokeapi_base_url=os.getenv("POKEAPI_BASE_URL", "https://pokeapi.co/api/v2/"),
+        http_timeout=float(os.getenv("HTTP_TIMEOUT", "15")),
     )
 
 
