@@ -21,9 +21,10 @@ import httpx
 
 from .config import SETTINGS
 
-# Cap embedded lists so a "all fire-type" style answer stays digestible; the full
-# count is always reported alongside the (possibly truncated) sample.
-MAX_LIST_ITEMS = 40
+# Default sample size for list-valued results. The full count always rides along,
+# and the caller (the agent, acting on the user's request) can raise it or pass
+# None for the complete list — there is deliberately no hard cap.
+DEFAULT_SAMPLE = 5
 
 
 class PokeApiError(Exception):
@@ -105,21 +106,60 @@ class PokeApiClient:
 
     # -- cleaned, domain-level reads --------------------------------------- #
     def pokemon(self, name_or_id: str | int) -> dict[str, Any]:
-        """`/pokemon/{}` -> types, abilities, base stats, physical attributes."""
+        """`/pokemon/{}` -> types, abilities, base stats, physical attributes.
+
+        `abilities` and `movepool` are returned together on purpose. An ability is
+        one of a Pokémon's 1-3 passive traits — NOT the set of things it can do. The
+        two concepts are distinct records in PokéAPI but a user's word "abilities"
+        often means "what can it do", so the movepool count travels with the ability
+        list to stop a reply presenting "two abilities" as the whole repertoire. Move
+        *names* come from `pokemon_moves()`.
+        """
         raw = self.get_json(f"pokemon/{normalize_name(name_or_id)}")
         stats = {s["stat"]["name"]: s["base_stat"] for s in raw.get("stats", [])}
+        abilities = [
+            {"name": a["ability"]["name"], "is_hidden": a["is_hidden"]}
+            for a in raw.get("abilities", [])
+        ]
+        move_count = len(raw.get("moves", []))
         return {
             "name": raw["name"],
             "id": raw["id"],
             "types": [t["type"]["name"] for t in raw.get("types", [])],
-            "abilities": [
-                {"name": a["ability"]["name"], "is_hidden": a["is_hidden"]}
-                for a in raw.get("abilities", [])
-            ],
+            "abilities": {
+                "count": len(abilities),
+                "items": abilities,
+                "note": (
+                    f"Passive traits only ({len(abilities)} here) — these are NOT the "
+                    f"moves it can use. This Pokémon also learns {move_count} moves; "
+                    f"report both so the ability count isn't read as its full moveset."
+                ),
+            },
             "base_stats": stats,
             "base_stat_total": sum(stats.values()),
             "height_m": raw.get("height", 0) / 10,   # decimetres -> metres
             "weight_kg": raw.get("weight", 0) / 10,   # hectograms -> kilograms
+            "movepool": {
+                "count": move_count,
+                "note": "Attacks it can learn — call get_pokemon_moves for names.",
+            },
+        }
+
+    def pokemon_moves(
+        self, name_or_id: str | int, limit: Optional[int] = DEFAULT_SAMPLE
+    ) -> dict[str, Any]:
+        """`/pokemon/{}` moves -> the (learnable) moves this Pokémon can have.
+
+        Distinct from `abilities` (passive traits): a Pokémon typically learns dozens
+        of moves. Returns the total `move_count` and a sorted sample of `limit` names
+        (default 5; pass `None` for the full list).
+        """
+        raw = self.get_json(f"pokemon/{normalize_name(name_or_id)}")
+        names = sorted({m["move"]["name"] for m in raw.get("moves", [])})
+        return {
+            "name": raw["name"],
+            "move_count": len(names),
+            "moves": names if limit is None else names[:limit],
         }
 
     def species(self, name_or_id: str | int) -> dict[str, Any]:
@@ -154,12 +194,16 @@ class PokeApiClient:
         tree = _parse_chain_node(raw["chain"], via=None)
         return {"base": tree["name"], "chain": tree}
 
-    def type_matchups(self, type_name: str) -> dict[str, Any]:
+    def type_matchups(
+        self, type_name: str, limit: Optional[int] = DEFAULT_SAMPLE
+    ) -> dict[str, Any]:
         """`/type/{}` -> damage relations (both directions) + the Pokémon of that type.
 
         Naming is from this type's perspective: `strong_against` are the types it
         deals 2x to (so those types are *weak to* it); `weak_to` are the types that
-        deal 2x to it. `pokemon_of_type` answers "show all X-type Pokémon" directly.
+        deal 2x to it. `pokemon_of_type` answers "show all X-type Pokémon" directly —
+        a sample of `limit` names (default 5; `None` for all), with the true total in
+        `pokemon_of_type_count`. Damage-relation lists are always complete.
         """
         raw = self.get_json(f"type/{normalize_name(type_name)}")
         rel = raw.get("damage_relations", {})
@@ -173,7 +217,7 @@ class PokeApiClient:
             "weak_to": names("double_damage_from"),         # these types beat it
             "resists": names("half_damage_from"),
             "immune_to": names("no_damage_from"),
-            "pokemon_of_type": pokemon[:MAX_LIST_ITEMS],
+            "pokemon_of_type": pokemon if limit is None else pokemon[:limit],
             "pokemon_of_type_count": len(pokemon),
         }
 
@@ -192,14 +236,20 @@ class PokeApiClient:
             ),
         }
 
-    def ability(self, ability_name: str) -> dict[str, Any]:
-        """`/ability/{}` -> effect text + the Pokémon that can have it."""
+    def ability(
+        self, ability_name: str, limit: Optional[int] = DEFAULT_SAMPLE
+    ) -> dict[str, Any]:
+        """`/ability/{}` -> effect text + the Pokémon that can have it.
+
+        The holder list is a sample of `limit` names (default 5; `None` for all),
+        with the true total in `pokemon_count`.
+        """
         raw = self.get_json(f"ability/{normalize_name(ability_name)}")
         pokemon = [p["pokemon"]["name"] for p in raw.get("pokemon", [])]
         return {
             "name": raw["name"],
             "effect": _first_english_effect(raw.get("effect_entries", []), None),
-            "pokemon": pokemon[:MAX_LIST_ITEMS],
+            "pokemon": pokemon if limit is None else pokemon[:limit],
             "pokemon_count": len(pokemon),
         }
 

@@ -9,6 +9,7 @@ from src.tools import (
     get_evolution_chain,
     get_move_details,
     get_pokemon,
+    get_pokemon_moves,
     get_type_matchups,
     search_pokemon_by_ability,
 )
@@ -19,7 +20,7 @@ pytestmark = pytest.mark.usefixtures("patched_tools")
 
 def test_registry_lists_all_agent_tools():
     assert set(ALL_TOOLS) == {
-        "get_pokemon", "get_pokemon_species", "get_evolution_chain",
+        "get_pokemon", "get_pokemon_species", "get_pokemon_moves", "get_evolution_chain",
         "get_type_matchups", "get_move_details", "search_pokemon_by_ability",
         "compare_pokemon",
     }
@@ -34,6 +35,22 @@ def test_get_pokemon_returns_clean_dict():
 def test_unknown_pokemon_yields_error_not_exception():
     out = get_pokemon.invoke({"name_or_id": "missingno"})
     assert "error" in out and "Not found" in out["error"]
+
+
+def test_get_pokemon_moves_lists_learnable_moves():
+    """Moves are distinct from abilities — a Pokémon learns many of them."""
+    out = get_pokemon_moves.invoke({"name_or_id": "charizard"})
+    assert out["move_count"] == 6          # true total is always reported
+    assert len(out["moves"]) == 5          # default sample
+    assert out["moves"] == sorted(out["moves"])  # sorted, deterministic
+
+
+def test_get_pokemon_moves_honors_limit_and_full_list():
+    """The agent passes `limit` from the user's request; None means every move."""
+    every = get_pokemon_moves.invoke({"name_or_id": "charizard", "limit": None})
+    assert every["move_count"] == 6 and len(every["moves"]) == 6
+    assert "fly" in every["moves"] and "flamethrower" in every["moves"]
+    assert len(get_pokemon_moves.invoke({"name_or_id": "charizard", "limit": 2})["moves"]) == 2
 
 
 def test_evolution_chain_preserves_branches():

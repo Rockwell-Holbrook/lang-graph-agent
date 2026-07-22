@@ -11,7 +11,7 @@ across calls). Tests swap it for one backed by an `httpx.MockTransport`.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.tools import tool
 
@@ -66,15 +66,30 @@ def get_evolution_chain(name_or_id: str) -> dict:
 
 
 @tool
-def get_type_matchups(type_name: str) -> dict:
+def get_type_matchups(type_name: str, limit: Optional[int] = 5) -> dict:
     """Get a type's damage relations and the Pokémon that have that type.
 
     Use for "Which Pokémon are weak to electric?" (answer at the type level:
     `strong_against` lists the types this type beats) and "Show all fire-type
     Pokémon" (`pokemon_of_type`). Directional: `strong_against` = deals 2x (those
-    types are weak to it); `weak_to` = takes 2x. 'error' key if the type is unknown.
+    types are weak to it); `weak_to` = takes 2x. `pokemon_of_type` is a sample of
+    `limit` names (default 5; `None` for all) with `pokemon_of_type_count` as the
+    true total. 'error' key if the type is unknown.
     """
-    return _safe(_CLIENT.type_matchups, type_name)
+    return _safe(_CLIENT.type_matchups, type_name, limit=limit)
+
+
+@tool
+def get_pokemon_moves(name_or_id: str, limit: Optional[int] = 5) -> dict:
+    """List the moves a Pokémon can learn (its attacks — NOT its passive abilities).
+
+    Use for "What moves can Lucario learn?" or when a user conflates a Pokémon's few
+    passive abilities with the many moves it can use. Returns the total `move_count`
+    and a sample of `limit` move names (default 5). Pass the number the user asked for
+    ("top 10" -> 10) or `None` for every move; call `get_move_details` for a specific
+    move. 'error' key if the Pokémon is unknown.
+    """
+    return _safe(_CLIENT.pokemon_moves, name_or_id, limit=limit)
 
 
 @tool
@@ -88,14 +103,15 @@ def get_move_details(move_name: str) -> dict:
 
 
 @tool
-def search_pokemon_by_ability(ability_name: str) -> dict:
+def search_pokemon_by_ability(ability_name: str, limit: Optional[int] = 5) -> dict:
     """Find which Pokémon can have a given ability, plus what the ability does.
 
     Use for "Which Pokémon have the ability intimidate?". Returns the ability's
-    effect and a (possibly truncated) list of Pokémon with a total count. 'error'
-    key if the ability is unknown.
+    effect and a sample of `limit` Pokémon (default 5; pass the number the user asked
+    for, or `None` for all) with `pokemon_count` as the true total. 'error' key if the
+    ability is unknown.
     """
-    return _safe(_CLIENT.ability, ability_name)
+    return _safe(_CLIENT.ability, ability_name, limit=limit)
 
 
 @tool
@@ -128,6 +144,7 @@ def compare_pokemon(names: list[str]) -> dict:
 AGENT_TOOLS = [
     get_pokemon,
     get_pokemon_species,
+    get_pokemon_moves,
     get_evolution_chain,
     get_type_matchups,
     get_move_details,

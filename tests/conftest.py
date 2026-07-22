@@ -27,7 +27,7 @@ BASE_URL = "https://pokeapi.co/api/v2/"
 # --------------------------------------------------------------------------- #
 def _pokemon(name: str, id: int, types: list[str],
              abilities: list[tuple[str, bool]], stats: dict[str, int],
-             height: int, weight: int) -> dict[str, Any]:
+             height: int, weight: int, moves: list[str] | None = None) -> dict[str, Any]:
     return {
         "name": name, "id": id, "height": height, "weight": weight,
         "types": [{"slot": i + 1, "type": {"name": t}} for i, t in enumerate(types)],
@@ -35,6 +35,8 @@ def _pokemon(name: str, id: int, types: list[str],
                       for i, (a, hidden) in enumerate(abilities)],
         "stats": [{"base_stat": v, "effort": 0, "stat": {"name": k}}
                   for k, v in stats.items()],
+        "moves": [{"move": {"name": m}, "version_group_details": []}
+                  for m in (moves or [])],
     }
 
 
@@ -76,7 +78,7 @@ POKEAPI_FIXTURES: dict[str, dict[str, Any]] = {
     "pokemon/charizard": _pokemon(
         "charizard", 6, ["fire", "flying"], [("blaze", False), ("solar-power", True)],
         _stats(hp=78, attack=84, defense=78, **{"special-attack": 109, "special-defense": 85}, speed=100),
-        17, 905),
+        17, 905, moves=["flamethrower", "fly", "dragon-claw", "air-slash", "fire-spin", "wing-attack"]),
     "pokemon/bulbasaur": _pokemon(
         "bulbasaur", 1, ["grass", "poison"], [("overgrow", False), ("chlorophyll", True)],
         _stats(hp=45, attack=49, defense=49, **{"special-attack": 65, "special-defense": 65}, speed=45),

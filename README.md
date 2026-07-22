@@ -119,15 +119,16 @@ user-friendly dict** — never raw JSON — or `{"error": ...}` on failure.
 
 | Tool | PokéAPI endpoint(s) | Returns |
 |---|---|---|
-| `get_pokemon` | `/pokemon/{}` | Types, abilities, base stats (+ total), height, weight. |
+| `get_pokemon` | `/pokemon/{}` | Types, abilities (passive traits, with count) **coupled to** `movepool` count, base stats (+ total), height, weight. |
 | `get_pokemon_species` | `/pokemon-species/{}` | Flavor text, generation, legendary/mythical flags, evolves-from. |
+| `get_pokemon_moves` | `/pokemon/{}` | The moves a Pokémon can learn (attacks — distinct from abilities): total count + a `limit`-sized sample (default 5, `None` for all). |
 | `get_evolution_chain` | `/pokemon-species/{}` → `/evolution-chain/{}` | The evolution **tree** (handles branching, e.g. Eevee), with the trigger per stage. |
-| `get_type_matchups` | `/type/{}` | Damage relations both directions + the Pokémon of that type. |
+| `get_type_matchups` | `/type/{}` | Damage relations both directions + a `limit`-sized sample of the Pokémon of that type (default 5) with the true total. |
 | `get_move_details` | `/move/{}` | Type, power, accuracy, PP, damage class, effect. |
-| `search_pokemon_by_ability` | `/ability/{}` | Effect text + Pokémon that can have it. |
+| `search_pokemon_by_ability` | `/ability/{}` | Effect text + a `limit`-sized sample of Pokémon that can have it (default 5) with the true total. |
 | `compare_pokemon` | `/pokemon/{}` ×N | Base stats of several Pokémon side by side. |
 
-**How the LLM decides to use them.** The `agent` node binds all seven with
+**How the LLM decides to use them.** The `agent` node binds all eight with
 `.bind_tools()`. Each turn the model either emits tool calls (executed by `ToolNode`,
 whose results are appended to state) or writes a final answer. The loop guard
 (`should_continue`) sends it back to `agent` after tools, up to `MAX_TOOL_ITERATIONS`
@@ -155,6 +156,11 @@ bot> Charizard can have Blaze, plus Solar Power as its hidden ability.
 you> Which Pokémon are weak to electric?      # objective metric, broad scope
 bot> Water- and Flying-types take double damage from Electric — e.g. Gyarados,
      Pidgeot, Wingull. Want me to check whether a specific Pokémon is weak to it?
+
+you> So Charizard only has two abilities?      # ability vs. move confusion
+bot> Right — "Abilities" are passive traits, and Charizard has two (Blaze, plus the
+     hidden Solar Power). That's separate from its *moves*: it can learn 131,
+     including Flamethrower, Fly, and Dragon Claw. Want a sample of those?
 
 you> Which is stronger, Dragonite or Salamence?   # undefined criterion -> clarify
 bot> Do you mean by base-stat total, by type matchup, or by competitive viability?
@@ -188,7 +194,7 @@ duck-typed `ScriptedLLM` standing in for the model (`GenericFakeChatModel` can't
 | `test_streaming.py` | SSE translation (tokens, chip, fallback, errors) + the LangGraph stream contract. |
 | `test_live.py` (`-m live`) | Grounding against the **real** PokéAPI (opt-in; off by default). |
 
-37 offline tests pass in ~3s; the 3 live checks pass against the real API when run
+40 offline tests pass in ~3s; the 3 live checks pass against the real API when run
 with `pytest -m live`.
 
 ---
@@ -204,6 +210,10 @@ with `pytest -m live`.
 - **Type-level answers + offer to drill in** over exhaustive enumeration — "weak to
   electric" answered from type relations plus a cheap single-Pokémon follow-up, instead
   of dozens of API calls that could hit the loop cap.
+- **List size is a `limit` argument, not a hard cap** — every list result defaults to a
+  5-item sample and always reports the true total; the agent widens it (`limit=10`, or
+  `None` for all) when the user asks. The presentation choice lives in the data contract,
+  not as a number the prompt hopes the model honors.
 - **In-process tools, not MCP** — single owner, single consumer; MCP would be premature
   distribution. Reversible later if a real shared boundary appears.
 - **`MemorySaver` (in-process), not a database** — right-sized for the exercise;

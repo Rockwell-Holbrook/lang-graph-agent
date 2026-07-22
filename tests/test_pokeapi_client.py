@@ -23,7 +23,10 @@ def test_pokemon_is_parsed_into_clean_shape(mock_client):
     assert poke["base_stats"]["special-attack"] == 109
     assert poke["base_stat_total"] == 534
     assert poke["height_m"] == 1.7 and poke["weight_kg"] == 90.5
-    assert {"name": "solar-power", "is_hidden": True} in poke["abilities"]
+    assert poke["abilities"]["count"] == 2
+    assert {"name": "solar-power", "is_hidden": True} in poke["abilities"]["items"]
+    # abilities and movepool travel together so "2 abilities" can't read as the whole set.
+    assert poke["movepool"]["count"] == 6
 
 
 def test_species_flavor_text_is_cleaned(mock_client):
@@ -38,6 +41,16 @@ def test_move_effect_substitutes_effect_chance(mock_client):
     move = mock_client.move("thunderbolt")
     assert move["power"] == 90 and move["damage_class"] == "special"
     assert move["effect"] == "Has a 10% chance to paralyze the target."
+
+
+def test_list_results_default_to_five_and_honor_limit(mock_client):
+    """List samples default to 5, report the true total, and can be widened or made
+    complete — the cap lives in the caller's request, not a hard limit in the client."""
+    charizard = mock_client.pokemon_moves("charizard")  # 6 moves in the fixture
+    assert charizard["move_count"] == 6            # true total, always complete
+    assert len(charizard["moves"]) == 5            # default sample
+    assert len(mock_client.pokemon_moves("charizard", limit=2)["moves"]) == 2
+    assert len(mock_client.pokemon_moves("charizard", limit=None)["moves"]) == 6  # all
 
 
 def test_type_matchups_direction_and_pokemon_list(mock_client):
