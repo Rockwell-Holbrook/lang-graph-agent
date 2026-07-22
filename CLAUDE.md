@@ -5,12 +5,10 @@ before making changes, and follow it over your defaults.
 
 ## Context
 
-This is a **LangGraph agent** built as a take-home engineering exercise. It is
-**graded primarily on architecture and engineering judgment, not on UI**. The work
-is time-boxed, but *do not trade correctness or design quality for speed*. The
-repo owner is highly experienced in TypeScript/Angular and deliberately holding a
-**high bar on Python idiom and LangGraph patterns** — call out and fix anything
-sub-standard rather than matching a lower bar.
+This is a **LangGraph agent** project. **Architecture and engineering judgment
+matter more than UI** — prioritize accordingly. Do not trade correctness or design
+quality for speed. Hold a **high bar on Python idiom and LangGraph patterns**; call
+out and fix anything sub-standard rather than matching a lower bar.
 
 ## Prime directive
 
@@ -46,7 +44,7 @@ principled path.
 - **Config and secrets from environment only.** Nothing hard-coded. Model, keys,
   and limits come from `.env` via `src/config.py`.
 
-## Python standards (hold the line — owner is newer to Python)
+## Python standards (hold the line)
 
 - `from __future__ import annotations` at the top of every module.
 - **Type-hint every function** — parameters and return type. No untyped signatures.
