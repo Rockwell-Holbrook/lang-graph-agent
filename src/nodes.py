@@ -2,87 +2,105 @@
 
 Each node is a pure-ish function: (state) -> partial state update. Keeping nodes
 small and single-purpose is what makes the graph readable and testable.
+
+The routing judgment is deliberately generic — the classifier answers one question
+(*can the agent give a concrete, defensible answer now?*) and the graph branches on
+the typed `Route`. Specific Pokémon phrasings live only as calibration examples in
+the prompt, never as branches in code.
 """
 from __future__ import annotations
 
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from .llm import get_llm
-from .schemas import Classification, DraftReply, Route
+from .schemas import Classification, QueryType, Route
 from .state import AgentState
-from .tools import AGENT_TOOLS, create_ticket
+from .tools import AGENT_TOOLS
 
 log = logging.getLogger("agent.nodes")
 
+# How many recent messages the classifier sees for follow-up context. Enough to
+# resolve "it"/"that one" without feeding it long tool-result blobs.
+CLASSIFY_CONTEXT_TURNS = 6
+
+
 # --------------------------------------------------------------------------- #
-# 1. CLASSIFY — turn a raw message into typed, branchable data.
+# 1. CLASSIFY — one generic judgment -> typed, branchable data.
 # --------------------------------------------------------------------------- #
 CLASSIFY_SYSTEM = (
-    "You are a triage assistant for a local business's customer inbox. "
-    "Classify the inbound message. Choose route=respond for straightforward "
-    "questions you can answer, route=escalate for complaints/billing disputes or "
-    "high urgency, and route=clarify when the message is too vague to act on."
+    "You classify a user's latest turn in a conversation about Pokémon, using the "
+    "PokéAPI as the source of truth. Make ONE judgment and set `route`:\n"
+    "- answer: you could give a concrete, grounded answer now — a reasonable default "
+    "exists even if the scope is broad. (e.g. 'What type is Pikachu?', 'Which Pokémon "
+    "are weak to electric?' -> the metric is objective, just broad; 'What abilities can "
+    "it have?' when a Pokémon was named earlier.)\n"
+    "- clarify: a required choice is undefined with no sensible default, OR a reference "
+    "cannot be resolved. (e.g. 'Which is stronger, Dragonite or Salamence?' -> 'stronger' "
+    "is undefined; 'Tell me about it' with no earlier Pokémon.)\n"
+    "- reject: the turn is not about Pokémon at all.\n"
+    "Judge the KIND of ambiguity, not the breadth of the answer. Broad-but-objective is "
+    "answer; undefined-criterion or unresolvable-reference is clarify."
 )
 
 
+def _recent_dialogue(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Recent human/AI turns only — skip tool traffic so the classifier sees clean
+    conversational context for resolving follow-ups."""
+    dialogue = [m for m in messages if isinstance(m, (HumanMessage, AIMessage)) and m.content]
+    return dialogue[-CLASSIFY_CONTEXT_TURNS:]
+
+
 def classify(state: AgentState) -> AgentState:
-    """LLM step with structured output -> Classification."""
+    """LLM step with structured output -> Classification (the routing decision)."""
     llm = get_llm().with_structured_output(Classification)
-    result: Classification = llm.invoke(
-        [
-            SystemMessage(content=CLASSIFY_SYSTEM),
-            HumanMessage(content=state["inbound_message"]),
-        ]
+    context = _recent_dialogue(state["messages"])
+    result: Classification = llm.invoke([SystemMessage(content=CLASSIFY_SYSTEM), *context])
+    log.info(
+        "classified query_type=%s route=%s followup=%s",
+        result.query_type, result.route, result.is_followup,
     )
-    log.info("classified intent=%s route=%s urgency=%s",
-             result.intent, result.route, result.urgency)
     return {"classification": result}
 
 
 # --------------------------------------------------------------------------- #
-# Conditional edge function: read classification, decide the branch.
-# This is the "router" — pure logic, no LLM call, fully deterministic.
+# Conditional edge: read classification, decide the branch. Pure, no LLM call.
 # --------------------------------------------------------------------------- #
 def route_after_classify(state: AgentState) -> str:
     classification: Classification = state["classification"]
-    # Safety override: never let the model auto-respond to high urgency.
-    if classification.urgency >= 4 and classification.route == Route.RESPOND:
-        return Route.ESCALATE.value
+    # Scope override: anything the model tags as off-topic is rejected outright,
+    # regardless of the route it suggested. Determinism where it counts.
+    if classification.query_type == QueryType.NOT_POKEMON:
+        return Route.REJECT.value
     return classification.route.value
 
 
 # --------------------------------------------------------------------------- #
-# 2a. AGENT — tool-calling node. May loop with the ToolNode (see graph.py).
+# 2a. AGENT — tool-calling node. Loops with the ToolNode (see graph.py).
 # --------------------------------------------------------------------------- #
 AGENT_SYSTEM = (
-    "You are a helpful customer-support agent for a local business. "
-    "Use tools to look up account details when relevant. Keep replies concise, "
-    "friendly, and accurate. When you have enough information, write the final "
-    "reply directly with no tool call."
+    "You are a friendly, knowledgeable Pokémon assistant. Answer using ONLY data you "
+    "fetch from the tools — never rely on memorized Pokémon facts. Call tools as needed, "
+    "including several times, to gather complete information before answering.\n"
+    "Resolve follow-ups from the conversation: if the user says 'it' or 'that one', they "
+    "mean the Pokémon discussed earlier.\n"
+    "Explain findings in clear natural language — do not dump raw JSON. For broad type "
+    "questions (e.g. 'which Pokémon are weak to electric?'), answer at the type level with "
+    "a few examples, then offer to check a specific Pokémon. If a tool returns an error, "
+    "tell the user plainly (e.g. a possible misspelling) rather than inventing an answer."
 )
 
 
 def agent(state: AgentState) -> AgentState:
-    """Bind tools and let the model either call a tool or produce a final reply."""
+    """Bind tools and let the model either call a tool or write the final reply.
+
+    The system prompt is injected at invoke time (not stored in state), so it never
+    duplicates across turns of a persisted conversation.
+    """
     llm = get_llm().bind_tools(AGENT_TOOLS)
-
-    # Seed the message channel on first entry.
-    messages = state.get("messages") or []
-    if not messages:
-        messages = [
-            SystemMessage(content=AGENT_SYSTEM),
-            HumanMessage(
-                content=(
-                    f"Customer (id={state.get('customer_id')}) says:\n"
-                    f"{state['inbound_message']}"
-                )
-            ),
-        ]
-
-    ai_msg = llm.invoke(messages)
-    return {"messages": [*(messages if not state.get("messages") else []), ai_msg]}
+    ai_msg = llm.invoke([SystemMessage(content=AGENT_SYSTEM), *state["messages"]])
+    return {"messages": [ai_msg]}
 
 
 def finalize_agent_reply(state: AgentState) -> AgentState:
@@ -92,35 +110,43 @@ def finalize_agent_reply(state: AgentState) -> AgentState:
 
 
 # --------------------------------------------------------------------------- #
-# 2b. ESCALATE — open a ticket, tell the customer a human will follow up.
+# 2b. REJECT — out-of-scope. Deterministic, no LLM, no tokens spent.
 # --------------------------------------------------------------------------- #
-def escalate(state: AgentState) -> AgentState:
-    c: Classification = state["classification"]
-    priority = "high" if c.urgency >= 4 else "normal"
-    ticket = create_ticket.invoke(
-        {"summary": f"[{c.intent.value}] {state['inbound_message'][:80]}",
-         "priority": priority}
-    )
-    reply = (
-        "Thanks for reaching out — I've flagged this to a team member who will "
-        f"follow up shortly (ref {ticket['ticket_id']})."
-    )
-    log.info("escalated -> %s", ticket["ticket_id"])
-    return {"final_reply": reply, "handled_by": "human"}
+REJECT_REPLY = (
+    "I'm a Pokémon assistant — I can answer questions about Pokémon, their types, "
+    "abilities, stats, moves, and evolutions using live PokéAPI data. Ask me something "
+    "like \"What are Charizard's base stats?\" or \"What does thunderbolt do?\""
+)
+
+
+def reject(state: AgentState) -> AgentState:
+    """Politely decline anything that isn't about Pokémon."""
+    log.info("rejected out-of-scope turn")
+    return {
+        "messages": [AIMessage(content=REJECT_REPLY)],
+        "final_reply": REJECT_REPLY,
+        "handled_by": "rejected",
+    }
 
 
 # --------------------------------------------------------------------------- #
-# 2c. CLARIFY — ask one focused follow-up question.
+# 2c. CLARIFY — ask one focused question when a required choice is undefined.
 # --------------------------------------------------------------------------- #
+CLARIFY_SYSTEM = (
+    "The user's Pokémon question is under-specified: a required choice has no obvious "
+    "default (e.g. 'stronger' could mean base stats, type advantage, or battle "
+    "viability), or a reference can't be resolved. Ask ONE short, friendly question that "
+    "would let you answer. Do not attempt to answer yet."
+)
+
+
 def clarify(state: AgentState) -> AgentState:
-    llm = get_llm().with_structured_output(DraftReply)
-    draft: DraftReply = llm.invoke(
-        [
-            SystemMessage(
-                content="The customer's message is too vague to act on. Write ONE "
-                "short, friendly clarifying question to move things forward."
-            ),
-            HumanMessage(content=state["inbound_message"]),
-        ]
-    )
-    return {"final_reply": draft.body, "handled_by": "clarify"}
+    """Generate a single clarifying question, grounded in the conversation."""
+    llm = get_llm()
+    context = _recent_dialogue(state["messages"])
+    question = llm.invoke([SystemMessage(content=CLARIFY_SYSTEM), *context])
+    return {
+        "messages": [question],
+        "final_reply": question.content,
+        "handled_by": "clarify",
+    }
