@@ -2,7 +2,9 @@
 
 The single source of truth that flows through every node. Nodes read from it and
 return partial updates; LangGraph merges those updates. `messages` uses the
-`add_messages` reducer so tool-calling turns accumulate correctly.
+`add_messages` reducer so tool-calling turns accumulate correctly, and — combined
+with the `MemorySaver` checkpointer in `graph.py` — persists across turns of a
+conversation so the agent can resolve "it" -> Charizard.
 """
 from __future__ import annotations
 
@@ -15,16 +17,13 @@ from .schemas import Classification
 
 
 class AgentState(TypedDict, total=False):
-    # --- Input ---
-    inbound_message: str           # the raw customer message
-    customer_id: Optional[str]     # known customer, if any
-
     # --- Conversation / tool-calling channel ---
-    # Reducer appends new messages instead of overwriting. This is what makes the
-    # agent<->tools cycle work.
+    # New user text enters as a HumanMessage appended here each turn. The reducer
+    # appends instead of overwriting — this is what makes both the agent<->tools
+    # cycle and multi-turn memory work.
     messages: Annotated[list, add_messages]
 
     # --- Derived by the graph ---
     classification: Optional[Classification]
-    final_reply: Optional[str]     # what we'd send back
-    handled_by: Optional[str]      # "agent" | "human" | "clarify" — for observability
+    final_reply: Optional[str]     # what we'd send back this turn
+    handled_by: Optional[str]      # "agent" | "clarify" | "rejected" — observability
