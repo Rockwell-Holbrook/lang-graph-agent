@@ -14,6 +14,7 @@ import logging
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+from .config import SETTINGS
 from .llm import get_llm
 from .schemas import Classification, QueryType, Route
 from .state import AgentState
@@ -53,7 +54,14 @@ def _recent_dialogue(messages: list[BaseMessage]) -> list[BaseMessage]:
 
 
 def classify(state: AgentState) -> AgentState:
-    """LLM step with structured output -> Classification (the routing decision)."""
+    """LLM step with structured output -> Classification (the routing decision).
+
+    Also clears `final_reply`: it is a per-turn derived value, but the checkpointer
+    persists every channel, so without a reset a turn that never sets a fresh reply
+    (an error path, or a consumer reading the rolling state early) would surface the
+    PREVIOUS turn's answer. classify runs first on every turn, so it's the natural
+    place to mark "no reply produced yet".
+    """
     llm = get_llm().with_structured_output(Classification)
     context = _recent_dialogue(state["messages"])
     result: Classification = llm.invoke([SystemMessage(content=CLASSIFY_SYSTEM), *context])
@@ -61,7 +69,7 @@ def classify(state: AgentState) -> AgentState:
         "classified query_type=%s route=%s followup=%s reason=%s",
         result.query_type, result.route, result.is_followup, result.reason,
     )
-    return {"classification": result}
+    return {"classification": result, "final_reply": None}
 
 
 # --------------------------------------------------------------------------- #
@@ -107,14 +115,36 @@ AGENT_SYSTEM = (
 )
 
 
+TOOL_BUDGET_NUDGE = (
+    "You have reached the tool-call limit for this turn. Do NOT request more data — "
+    "answer now from the tool results already gathered, and say so briefly if something "
+    "is incomplete."
+)
+
+
 def agent(state: AgentState) -> AgentState:
-    """Bind tools and let the model either call a tool or write the final reply.
+    """Let the model either call a tool or write the final reply.
+
+    The tool budget is enforced HERE, not in the loop guard. Once `max_tool_iterations`
+    tool rounds have run we invoke the model WITHOUT tools, so it cannot request another
+    call we'd have to drop — dropping one would persist a tool_calls message with no
+    matching ToolMessage and break the next turn. Withholding tools guarantees the loop
+    terminates (no new tool_calls -> finalize) while keeping the history valid.
 
     The system prompt is injected at invoke time (not stored in state), so it never
     duplicates across turns of a persisted conversation.
     """
-    llm = get_llm().bind_tools(AGENT_TOOLS)
-    ai_msg = llm.invoke([SystemMessage(content=AGENT_SYSTEM), *state["messages"]])
+    messages = state["messages"]
+    tool_rounds = sum(1 for m in messages if getattr(m, "type", None) == "tool")
+    prompt: list[BaseMessage] = [SystemMessage(content=AGENT_SYSTEM)]
+
+    llm = get_llm()
+    if tool_rounds < SETTINGS.max_tool_iterations:
+        llm = llm.bind_tools(AGENT_TOOLS)
+    else:
+        prompt.append(SystemMessage(content=TOOL_BUDGET_NUDGE))
+
+    ai_msg = llm.invoke([*prompt, *messages])
     return {"messages": [ai_msg]}
 
 

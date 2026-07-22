@@ -56,7 +56,15 @@ def _event_stream(req: ChatRequest) -> Iterator[str]:
     # the client didn't supply it (a fresh, memoryless conversation).
     thread_id = req.thread_id or uuid.uuid4().hex
     config = {"configurable": {"thread_id": thread_id}}
-    payload = {"messages": [HumanMessage(content=req.message)]}
+    # Only `messages` accumulates across turns. `classification` and `final_reply` are
+    # per-turn derived channels the checkpointer would otherwise carry over, so the
+    # stream's initial (pre-classify) emission would hand us the PREVIOUS turn's chip
+    # and reply. Reset them so we read only this turn's values.
+    payload = {
+        "messages": [HumanMessage(content=req.message)],
+        "classification": None,
+        "final_reply": None,
+    }
 
     streamed_any = False
     final_reply: Optional[str] = None

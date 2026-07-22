@@ -212,11 +212,13 @@ class ScriptedLLM:
                  ai: list[Any] | None = None) -> None:
         self._structured = list(structured or [])
         self._ai = list(ai or [])
+        self.bound_tools: Any = None  # records the last .bind_tools() argument, for tests
 
     def with_structured_output(self, _model: Any) -> _ScriptedRunnable:
         return _ScriptedRunnable(self._structured, "structured")
 
-    def bind_tools(self, _tools: Any) -> _ScriptedRunnable:
+    def bind_tools(self, tools: Any) -> _ScriptedRunnable:
+        self.bound_tools = tools
         return _ScriptedRunnable(self._ai, "AI message")
 
     def invoke(self, *_args: Any, **_kwargs: Any) -> Any:  # plain path (clarify node)

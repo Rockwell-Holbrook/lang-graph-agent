@@ -28,3 +28,13 @@ def test_classify_returns_structured_classification(scripted_llm):
     ])
     out = classify({"messages": [HumanMessage(content="What type is Pikachu?")]})
     assert out["classification"].route == Route.ANSWER
+
+
+def test_classify_resets_final_reply_each_turn(scripted_llm):
+    """A new turn must not inherit the previous turn's reply from the persisted state."""
+    scripted_llm(structured=[
+        Classification(query_type=QueryType.POKEMON_INFO, route=Route.ANSWER, reason="x"),
+    ])
+    out = classify({"messages": [HumanMessage(content="What type is Pikachu?")],
+                    "final_reply": "stale answer from a previous turn"})
+    assert out["final_reply"] is None

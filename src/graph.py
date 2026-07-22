@@ -25,7 +25,6 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from .config import SETTINGS
 from .nodes import (
     agent,
     classify,
@@ -39,12 +38,18 @@ from .tools import AGENT_TOOLS
 
 
 def should_continue(state: AgentState) -> str:
-    """Loop guard for the agent<->tools cycle."""
-    messages = state["messages"]
-    last = messages[-1]
-    tool_rounds = sum(1 for m in messages if getattr(m, "type", None) == "tool")
-    has_tool_call = bool(getattr(last, "tool_calls", None))
-    if has_tool_call and tool_rounds < SETTINGS.max_tool_iterations:
+    """Loop guard for the agent<->tools cycle.
+
+    Invariant: every assistant `tool_calls` message MUST be answered by a ToolNode
+    round. Abandoning a pending call would persist an AIMessage whose tool_calls have
+    no matching ToolMessage, and OpenAI rejects that history on the next turn ("tool_
+    call_ids did not have response messages"). So pending tool-calls always route to
+    `tools`. The iteration budget is NOT enforced here by dropping a call — it is
+    enforced in the `agent` node, which stops *offering* tools once the cap is reached,
+    so the model simply can't request another round.
+    """
+    last = state["messages"][-1]
+    if getattr(last, "tool_calls", None):
         return "tools"
     return "finalize"
 

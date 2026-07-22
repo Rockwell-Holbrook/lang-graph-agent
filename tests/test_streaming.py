@@ -41,8 +41,10 @@ class FakeGraph:
 
     def __init__(self, script):
         self._script = script
+        self.last_payload = None
 
     def stream(self, payload, config=None, stream_mode=None):
+        self.last_payload = payload
         for item in self._script:
             if isinstance(item, Exception):
                 raise item
@@ -95,6 +97,18 @@ def test_reject_path_falls_back_to_final_reply():
     tokens = [e["text"] for e in events if e["type"] == "token"]
     assert tokens == ["I'm a Pokémon assistant."]
     assert events[-1]["type"] == "done"
+
+
+def test_new_turn_resets_persisted_derived_state():
+    """Regression: `classification` and `final_reply` are per-turn derived channels the
+    checkpointer persists. If a turn doesn't reset them, the stream's initial emission
+    hands back the PREVIOUS turn's values — the chip lags a turn and a no-stream turn
+    echoes the last reply. The request payload must clear them."""
+    g = FakeGraph([("values", {"final_reply": "ok"})])
+    server.GRAPH = g
+    _collect(ChatRequest(message="hi", thread_id="t"))
+    assert g.last_payload["classification"] is None
+    assert g.last_payload["final_reply"] is None
 
 
 def test_error_mid_stream_becomes_error_event():
