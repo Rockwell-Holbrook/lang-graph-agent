@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from src.graph import GRAPH
 
-app = FastAPI(title="Podium Agent")
+app = FastAPI(title="LangGraph Agent")
 
 WEB_DIR = Path(__file__).parent / "web"
 

@@ -1,8 +1,8 @@
-# Podium Agent Scaffold (LangGraph)
+# LangGraph Agent Scaffold
 
 A small, production-shaped LangGraph agent you can reuse as a starting point for an
 open-ended "build an agent" exercise. The domain here is **inbound customer-message
-triage** (a natural fit for Podium), but the architecture is the point — swap the
+triage** (a common real-world domain), but the architecture is the point — swap the
 schemas, tools, and prompts to retarget it in minutes.
 
 ## Why a graph and not a chain

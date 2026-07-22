@@ -14,7 +14,7 @@ from .schemas import Classification, DraftReply, Route
 from .state import AgentState
 from .tools import AGENT_TOOLS, create_ticket
 
-log = logging.getLogger("podium.nodes")
+log = logging.getLogger("agent.nodes")
 
 # --------------------------------------------------------------------------- #
 # 1. CLASSIFY — turn a raw message into typed, branchable data.
