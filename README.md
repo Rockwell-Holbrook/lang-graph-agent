@@ -143,36 +143,61 @@ timeout become a clear message, never an exception).
 
 ---
 
-## Example conversations
+## Example conversation
+
+A real transcript from the web UI. The `route … · …` line is the chip the UI renders
+from the classifier's typed decision (`route` · `query_type`), so every turn shows the
+branch it actually took.
 
 ```
-you> Tell me about Charizard
-bot> Charizard is a Fire/Flying-type Pokémon (#6). Its abilities are Blaze and,
-     hidden, Solar Power. Base stats total 534 — highest is Special Attack (109).
+you> What type is Pikachu?
+     route answer · pokemon_info
+bot> Pikachu is an Electric-type Pokémon. It has two abilities: Static (which is its
+     primary ability) and Lightning Rod (which is a hidden ability). Pikachu can learn
+     a total of 109 moves.
 
-you> What abilities can it have?              # "it" -> Charizard, from memory
-bot> Charizard can have Blaze, plus Solar Power as its hidden ability.
+you> What abilities can Bulbasaur have?
+     route answer · pokemon_info
+bot> Bulbasaur has two abilities: Overgrow (its primary ability) and Chlorophyll
+     (which is a hidden ability). Bulbasaur can learn a total of 86 moves.
 
-you> Which Pokémon are weak to electric?      # objective metric, broad scope
-bot> Water- and Flying-types take double damage from Electric — e.g. Gyarados,
-     Pidgeot, Wingull. Want me to check whether a specific Pokémon is weak to it?
+you> What are Charizard's base stats?
+     route answer · pokemon_info
+bot> Charizard's base stats are as follows:
 
-you> So Charizard only has two abilities?      # ability vs. move confusion
-bot> Right — "Abilities" are passive traits, and Charizard has two (Blaze, plus the
-     hidden Solar Power). That's separate from its *moves*: it can learn 131,
-     including Flamethrower, Fly, and Dragon Claw. Want a sample of those?
+     - HP: 78
+     - Attack: 84
+     - Defense: 78
+     - Special Attack: 109
+     - Special Defense: 85
+     - Speed: 100
 
-you> Which is stronger, Dragonite or Salamence?   # undefined criterion -> clarify
-bot> Do you mean by base-stat total, by type matchup, or by competitive viability?
+     The total of these base stats is 534. Charizard is a Fire/Flying-type Pokémon and
+     has two abilities: Blaze (primary) and Solar Power (hidden). It can learn a total
+     of 131 moves.
 
-you> What is the effect of thundrbolt?        # misspelling -> graceful handling
-bot> I couldn't find a move called "thundrbolt" — did you mean thunderbolt? It's a
-     90-power Electric special move with a 10% chance to paralyze.
+you> Which Pokémon evolve from Eevee?
+     route answer · evolution
+bot> Eevee can evolve into several different Pokémon, each through specific methods:
 
-you> Who won the world cup?                    # out of scope -> reject
-bot> I'm a Pokémon assistant — ask me about types, abilities, stats, moves, or
-     evolutions.
+     1. Vaporeon — Evolve by using a Water Stone.
+     2. Jolteon  — Evolve by using a Thunder Stone.
+     3. Flareon  — Evolve by using a Fire Stone.
+     4. Espeon   — Evolve by achieving high friendship during the day.
+     5. Umbreon  — Evolve by achieving high friendship during the night.
+     6. Leafeon  — Evolve by leveling up in a specific location (in some games).
+     7. Glaceon  — Evolve by leveling up in a specific location (in some games).
+     8. Sylveon  — Evolve by leveling up with a high friendship while knowing a
+        Fairy-type move.
+
+     These evolutions provide a variety of types and abilities for Eevee.
 ```
+
+Note the branching evolution tree in the last turn (Eevee's eight-way split), and that
+abilities are consistently reported *coupled to* the movepool count — the data contract
+in `get_pokemon` is what keeps the model from conflating abilities with moves. The
+`clarify` and `reject` branches aren't exercised above; they're covered in
+`test_router.py`, and multi-turn reference resolution in `test_multiturn.py`.
 
 ---
 
