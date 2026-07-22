@@ -1,10 +1,12 @@
 # Pokémon Agent
 
 A conversational agent that answers questions about Pokémon, grounded in **live
-[PokéAPI](https://pokeapi.co/docs/v2) data** — never hardcoded knowledge. It holds
-multi-turn context (so "What abilities can *it* have?" resolves against the Pokémon
-you just asked about), decides for itself which endpoints to call, and degrades
-gracefully on bad input.
+[PokéAPI](https://pokeapi.co/docs/v2) data** — and when a question falls outside the
+API (e.g. competitive tiers or "which is strongest"), it answers from general
+knowledge but says so explicitly rather than passing it off as official data. It
+holds multi-turn context (so "What abilities can *it* have?" resolves against the
+Pokémon you just asked about), decides for itself which endpoints to call, and
+degrades gracefully on bad input.
 
 Built on **LangGraph** as an explicit state machine: a typed state object flows
 through nodes, a structured-output classifier gates each turn, and a bounded
